@@ -1,0 +1,13 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden; /* no scrollbars, ever */
+  background: #08060d;
+}
+
+#stage {
+  display: block; /* canvases are inline by default, which leaves a gap below */
+  width: 100vw;
+  height: 100vh;
+}
