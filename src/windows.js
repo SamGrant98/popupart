@@ -26,14 +26,16 @@ const PAPER = '#f3f2ee';
 const ORANGE = '#ff6601';
 const CATEGORY = ['#a274ff', '#00a456', '#3cc8ff', '#ffd619']; // sound, movement, space, play
 
-const IN_TIME = 0.16; // seconds to pop in
-const OUT_TIME = 0.1; // seconds to pop out (closing is snappier than opening)
+const IN_TIME = 0.1; // seconds to pop in
+const OUT_TIME = 0.06; // seconds to pop out (closing is snappier than opening)
+const LEAVE_GRACE = 0.08; // seconds off you before a popup closes early
 
 // Tunable by the controls later.
 export const popupSettings = {
-  count: 50, // popups on screen (roughly)
-  life: [1.0, 3.0], // how long each one stays open, min..max seconds
-  gap: [0.05, 0.6], // pause before a slot opens its next popup
+  count: 70, // popups on screen (roughly)
+  life: [0.5, 1.4], // how long each one stays open, min..max seconds
+  gap: [0, 0.08], // pause before a slot opens its next popup
+  leave: true, // close early when you move out from under it
   size: 1, // overall size multiplier
   // Where popups open. Don't need to add up to 1; they're relative.
   weights: { face: 0.45, body: 0.35, torso: 0.2 },
@@ -57,7 +59,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 // Overshoot ease: grows a touch past full size, then settles. Gives the
 // "pop" without a bouncy spring.
 function easeOutBack(t) {
-  const c = 1.9;
+  const c = 2.6;
   return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2;
 }
 
@@ -111,7 +113,7 @@ export function createWindows(segmenter) {
       const unit = Math.min(screen.w, screen.h);
       const a = Math.random() * Math.PI * 2;
       const d = Math.pow(Math.random(), 1.5) * unit * 0.3;
-      return { x: fallback.x + Math.cos(a) * d, y: fallback.y + Math.sin(a) * d * 0.8, part: 'face' };
+      return { x: fallback.x + Math.cos(a) * d, y: fallback.y + Math.sin(a) * d * 0.8, part: 'face', free: true };
     }
     const s = segmenter.state;
     const pool = pools[part];
@@ -125,7 +127,7 @@ export function createWindows(segmenter) {
   }
 
   function spawn(cam, fallback) {
-    const { x, y, part } = pickSpot(cam, fallback);
+    const { x, y, part, free } = pickSpot(cam, fallback);
     const spec = PARTS[part];
     const unit = Math.min(screen.w, screen.h) / 800;
     const big = Math.random() < 0.1; // the odd big one
@@ -135,6 +137,8 @@ export function createWindows(segmenter) {
     const h = Math.max(40, Math.round((w * rand(0.55, 1)) / 8) * 8) + BAR;
     return {
       x, y, w, h, part,
+      free: !!free, // mouse popups don't check whether you're under them
+      away: 0, // how long you've been gone from under it
       life: rand(popupSettings.life[0], popupSettings.life[1]),
       order: order++,
       name: `${spec.name}_${String(Math.floor(rand(1, 100))).padStart(2, '0')}.exe`,
@@ -143,11 +147,31 @@ export function createWindows(segmenter) {
     };
   }
 
+  // Is the screen point x, y still on you? (Background = no.)
+  function onYou(x, y, cam) {
+    const { rect, width } = cam;
+    const u = (width - x - rect.x) / rect.w; // undo the mirror
+    const v = (y - rect.y) / rect.h;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return false;
+    return segmenter.labelAt(u, v) !== CLASS.background;
+  }
+
   // Step every slot through its loop. cam as in pickSpot.
   function update(dt, cam, fallback) {
     refreshPools();
     for (const slot of slots) {
       slot.t += dt;
+      // You moved away from under this popup: close it early, so the slot
+      // is free to open again where you are now.
+      const p = slot.popup;
+      if (popupSettings.leave && p && !p.free && (slot.phase === 'in' || slot.phase === 'hold')) {
+        p.away = onYou(p.x, p.y, cam) ? 0 : p.away + dt;
+        if (p.away > LEAVE_GRACE) {
+          slot.phase = 'out';
+          slot.t = 0;
+          continue;
+        }
+      }
       if (slot.phase === 'wait' && slot.t >= slot.wait) {
         slot.popup = spawn(cam, fallback);
         slot.phase = 'in';

@@ -44,6 +44,6 @@ The main screen is the desktop, never the full camera feed. You only exist insid
 - [x] 3. Tracking (src/tracking.js): MediaPipe face detector + hand landmarker, ~60% windows on the face, ~20% per hand, hands fall back to the face, mouse fallback. Logic tested with simulated detections; needs a real-camera test once the model files are in public/models/.
 - [x] R1. Segmentation (src/segment.js): label map at 160px wide, S shows it tinted over the desktop. Needs the model file.
 - [x] R4. Desktop background (24px dot grid), camera feed no longer drawn full screen.
-- [x] R2. Pop in / pop out (src/windows.js): 50 slots loop wait > in > hold > out. Spots picked from the segmentation map, weighted face 45 / hands and bare arms 35 / torso and sleeves 20 (torso popups smaller). Mouse fallback until the model loads. Springs and the face/hand tracker removed. 60fps in testing.
+- [x] R2. Pop in / pop out (src/windows.js): 70 slots loop wait > in > hold > out (life 0.5 to 1.4s, pop in 0.1s). A popup closes early once you've left the spot under it for 0.08s; after a big move the crowd catches up in about 0.3s. Spots picked from the segmentation map, weighted face 45 / hands and bare arms 35 / torso and sleeves 20 (torso popups smaller). Mouse fallback until the model loads. Springs and the face/hand tracker removed. 60fps in testing.
 - [ ] R3. Render modes
 - [ ] R5. Audio to popups
