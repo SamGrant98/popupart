@@ -3,6 +3,7 @@ import { createAudio } from './audio.js'
 import { createMeter } from './meter.js'
 import { createWindows } from './windows.js'
 import { createTracking } from './tracking.js'
+import { createSegmenter } from './segment.js'
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -40,8 +41,35 @@ const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
 const focus = { ...pointer };
 addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
 
-// How dark the full camera feed behind the windows is (0 = off, 1 = black).
-const BACKDROP_DIM = 0.78;
+// --- Segmentation ---
+// Labels every camera pixel (face, hands, hair, clothes, background).
+// S shows it tinted over the screen.
+const segmenter = createSegmenter();
+let showSegment = false;
+addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 's' && !e.repeat) showSegment = !showSegment;
+});
+
+// --- Desktop ---
+// The background is the made-up OS desktop: ink with the madebysam dot
+// grid. The camera only ever appears inside windows. Drawn once into a
+// pattern tile and reused every frame.
+const GRID = 24;
+const tile = document.createElement('canvas');
+tile.width = tile.height = GRID;
+{
+  const t = tile.getContext('2d');
+  t.fillStyle = '#0d0d0f';
+  t.fillRect(0, 0, GRID, GRID);
+  t.fillStyle = '#2a2a30';
+  t.beginPath();
+  t.arc(0, 0, 1.5, 0, Math.PI * 2); // dot on the corner, so dots sit on multiples of 24
+  t.arc(GRID, 0, 1.5, 0, Math.PI * 2);
+  t.arc(0, GRID, 1.5, 0, Math.PI * 2);
+  t.arc(GRID, GRID, 1.5, 0, Math.PI * 2);
+  t.fill();
+}
+const desktop = ctx.createPattern(tile, 'repeat');
 
 // --- Camera ---
 
@@ -109,20 +137,11 @@ function render(now) {
 
   const rect = getCoverRect();
 
-  // Mirror the video feed
-  ctx.save()
-
-  ctx.translate(canvas.width, 0)
-  ctx.scale(-1, 1) // flips x axis
-
-  // Draw the current camera frame, cover-fitted to the canvas.
-  ctx.drawImage(video, rect.x, rect.y, rect.w, rect.h);
-
-  ctx.restore()
-
-  // Dim the full feed so the windows are what you look at.
-  ctx.fillStyle = `rgba(13, 13, 15, ${BACKDROP_DIM})`;
+  // Desktop background (no camera feed).
+  ctx.fillStyle = desktop;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  segmenter.update(video, now);
 
   // Windows: ease the focus towards the pointer, spring the windows
   // towards the focus, then draw them as portals onto the camera.
@@ -132,6 +151,7 @@ function render(now) {
   tracking.update(cam, Math.min(canvas.width, canvas.height), now, dt);
   windows.update(dt, tracking.anchors(focus), (now - start) / 1000);
   windows.draw(ctx, cam);
+  if (showSegment) segmenter.drawDebug(ctx, cam);
   if (showTracking) tracking.drawDebug(ctx);
 
 
@@ -144,4 +164,5 @@ function render(now) {
 startCamera().then(() => {
   requestAnimationFrame(render);
   tracking.init(); // loads in the background; the mouse works meanwhile
+  segmenter.init();
 });

@@ -1,6 +1,6 @@
 # popupart · project brief
 
-**One line:** your webcam, broken into little windows that crowd around you and move with the music.
+**One line:** an empty desktop where retro popups keep opening over wherever you are, each one showing a bit of you (camera, dots or ASCII), in time with the music.
 
 Lab project for madebysam.dev (category: Play). Vite, vanilla JS, canvas 2D. Inspired by the "segcam" effect (@lo.fi.sci.fi via a dj_dave reel), rebuilt for the browser.
 
@@ -18,20 +18,32 @@ Lab project for madebysam.dev (category: Play). Vite, vanilla JS, canvas 2D. Ins
 5. **Always visible:** a meter (M) shows what it hears before anything is driven by it.
 
 ## Build order
-1. **Audio + meter.** Nothing reacts yet; tune it with real music until the kick light is reliable.
-2. **Windows.** Retro-OS frames showing crops of the camera, on springs (glide, never snap).
-3. **Tracking.** MediaPipe face + hands give the targets the windows crowd around.
-4. **Audio to windows.** kick: windows jolt · low: window size · high: glitch.
-5. **Controls.** Presets, panel, keyboard; performer mode.
-6. **Into the lab.** madebysam lab shell, project page, screenshot.
+1. **Audio + meter.** Nothing reacts yet; tune it with real music until the kick light is reliable. (done)
+2. **Windows v1.** Spring windows on camera crops. (done, being replaced)
+3. **Tracking v1.** Face detector + hand landmarker. (done, being replaced by segmentation)
+
+### Redesign (agreed after the first pass)
+The main screen is the desktop, never the full camera feed. You only exist inside the popups.
+- **R1. Segmentation.** MediaPipe multiclass selfie segmenter: background, hair, body skin (hands), face, clothes. (done)
+- **R4. Desktop.** madebysam dark dot grid as the background. (done)
+- **R2. Pop in / pop out.** 40 to 60 windows that open and close over where you are (no travelling). Spawn points picked from the mask, weighted to face and hands. Scale in, live a while, scale out.
+- **R3. Render modes.** Each window shows you as camera cutout (via the mask), halftone dots or ASCII. Roughly 50 / 30 / 20. Name follows mode: `cam_07.exe`, `dots_12.exe`, `ascii_03.txt`.
+- **R5. Audio to popups.** Kick: burst of new windows. Low: window size. High: glitch / ASCII flicker. One master reactivity, F to freeze, an enable-sound prompt.
+- **R6. Controls.** Presets, panel, keyboard; performer mode.
+- **R7. Into the lab.** madebysam lab shell, project page, screenshot.
 
 ## Setup notes
 - `npm install` also copies the MediaPipe engine into `public/mediapipe/` (postinstall, gitignored).
-- Model files go in `public/models/` (committed): `blaze_face_short_range.tflite`, `hand_landmarker.task`.
+- Model files go in `public/models/` (committed): `blaze_face_short_range.tflite`, `hand_landmarker.task`, `selfie_multiclass_256x256.tflite`.
+- Debug keys: M audio meter, T tracking, S segmentation.
 
 ## Status
 - [x] Mirrored, cover-fitted camera feed
 - [x] 1. Audio + meter (src/audio.js, src/meter.js). Tested with generated tracks in test-audio/: 120bpm simple 43/42 kicks; 128bpm club mix (held sub bass, snare, room noise, kickless breakdown) median gap 0.468s, no double triggers.
 - [x] 2. Windows (src/windows.js): 18 retro-OS frames as camera portals, spring physics, crowd around the mouse for now. 60fps in testing.
-- [~] 3. Tracking (src/tracking.js): MediaPipe face detector + hand landmarker, ~60% windows on the face, ~20% per hand, hands fall back to the face, mouse fallback. Logic tested with simulated detections; needs a real-camera test once the model files are in public/models/.
-- [ ] 4. Audio to windows
+- [x] 3. Tracking (src/tracking.js): MediaPipe face detector + hand landmarker, ~60% windows on the face, ~20% per hand, hands fall back to the face, mouse fallback. Logic tested with simulated detections; needs a real-camera test once the model files are in public/models/.
+- [x] R1. Segmentation (src/segment.js): label map at 160px wide, S shows it tinted over the desktop. Needs the model file.
+- [x] R4. Desktop background (24px dot grid), camera feed no longer drawn full screen.
+- [ ] R2. Pop in / pop out
+- [ ] R3. Render modes
+- [ ] R5. Audio to popups
