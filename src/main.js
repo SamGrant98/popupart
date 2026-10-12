@@ -1,6 +1,7 @@
 import './style.css'
 import { createAudio } from './audio.js'
 import { createMeter } from './meter.js'
+import { createWindows } from './windows.js'
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -13,12 +14,25 @@ function resize() {
 }
 
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); windows.build(canvas.width, canvas.height); });
 
 // --- Audio ---
 // Nothing reacts to it yet (step 1): the meter just shows what it hears.
 const audio = createAudio();
 const meter = createMeter(audio);
+
+// --- Windows ---
+const windows = createWindows();
+windows.build(canvas.width, canvas.height);
+
+// Until face tracking (step 3), the windows crowd around the mouse.
+// The focus eases after the pointer so even fast flicks look smooth.
+const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
+const focus = { ...pointer };
+addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
+
+// How dark the full camera feed behind the windows is (0 = off, 1 = black).
+const BACKDROP_DIM = 0.78;
 
 // --- Camera ---
 
@@ -73,6 +87,8 @@ function getCoverRect() {
 
 let last = performance.now();
 
+const start = performance.now();
+
 function render(now) {
   // Seconds since the last frame (capped, so a background tab doesn't
   // make everything jump when you come back).
@@ -94,6 +110,17 @@ function render(now) {
   ctx.drawImage(video, rect.x, rect.y, rect.w, rect.h);
 
   ctx.restore()
+
+  // Dim the full feed so the windows are what you look at.
+  ctx.fillStyle = `rgba(13, 13, 15, ${BACKDROP_DIM})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Windows: ease the focus towards the pointer, spring the windows
+  // towards the focus, then draw them as portals onto the camera.
+  focus.x += (pointer.x - focus.x) * (1 - Math.exp(-dt / 0.08));
+  focus.y += (pointer.y - focus.y) * (1 - Math.exp(-dt / 0.08));
+  windows.update(dt, focus, (now - start) / 1000);
+  windows.draw(ctx, { video, rect, width: canvas.width });
 
 
   // Ask the browser to call render again before the next screen refresh.

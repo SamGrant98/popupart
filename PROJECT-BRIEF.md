@@ -28,4 +28,5 @@ Lab project for madebysam.dev (category: Play). Vite, vanilla JS, canvas 2D. Ins
 ## Status
 - [x] Mirrored, cover-fitted camera feed
 - [x] 1. Audio + meter (src/audio.js, src/meter.js). Tested with generated tracks in test-audio/: 120bpm simple 43/42 kicks; 128bpm club mix (held sub bass, snare, room noise, kickless breakdown) median gap 0.468s, no double triggers.
-- [ ] 2. Windows (made-up retro OS frames, camera crops, springs)
+- [x] 2. Windows (src/windows.js): 18 retro-OS frames as camera portals, spring physics, crowd around the mouse for now. 60fps in testing.
+- [ ] 3. Tracking (MediaPipe face + hands as targets)
