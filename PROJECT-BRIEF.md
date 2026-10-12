@@ -26,7 +26,7 @@ Lab project for madebysam.dev (category: Play). Vite, vanilla JS, canvas 2D. Ins
 The main screen is the desktop, never the full camera feed. You only exist inside the popups.
 - **R1. Segmentation.** MediaPipe multiclass selfie segmenter: background, hair, body skin (hands), face, clothes. (done)
 - **R4. Desktop.** madebysam dark dot grid as the background. (done)
-- **R2. Pop in / pop out.** 40 to 60 windows that open and close over where you are (no travelling). Spawn points picked from the mask, weighted to face and hands. Scale in, live a while, scale out.
+- **R2. Pop in / pop out.** 40 to 60 windows that open and close over where you are (no travelling). Spawn points picked from the mask: face, hands and arms, and a little torso. Sleeved arms count as clothes; if they need their own share, add MediaPipe pose later. Scale in, live a while, scale out.
 - **R3. Render modes.** Each window shows you as camera cutout (via the mask), halftone dots or ASCII. Roughly 50 / 30 / 20. Name follows mode: `cam_07.exe`, `dots_12.exe`, `ascii_03.txt`.
 - **R5. Audio to popups.** Kick: burst of new windows. Low: window size. High: glitch / ASCII flicker. One master reactivity, F to freeze, an enable-sound prompt.
 - **R6. Controls.** Presets, panel, keyboard; performer mode.
@@ -34,8 +34,8 @@ The main screen is the desktop, never the full camera feed. You only exist insid
 
 ## Setup notes
 - `npm install` also copies the MediaPipe engine into `public/mediapipe/` (postinstall, gitignored).
-- Model files go in `public/models/` (committed): `blaze_face_short_range.tflite`, `hand_landmarker.task`, `selfie_multiclass_256x256.tflite`.
-- Debug keys: M audio meter, T tracking, S segmentation.
+- Model file goes in `public/models/` (committed): `selfie_multiclass_256x256.tflite`.
+- Debug keys: M audio meter, S segmentation.
 
 ## Status
 - [x] Mirrored, cover-fitted camera feed
@@ -44,6 +44,6 @@ The main screen is the desktop, never the full camera feed. You only exist insid
 - [x] 3. Tracking (src/tracking.js): MediaPipe face detector + hand landmarker, ~60% windows on the face, ~20% per hand, hands fall back to the face, mouse fallback. Logic tested with simulated detections; needs a real-camera test once the model files are in public/models/.
 - [x] R1. Segmentation (src/segment.js): label map at 160px wide, S shows it tinted over the desktop. Needs the model file.
 - [x] R4. Desktop background (24px dot grid), camera feed no longer drawn full screen.
-- [ ] R2. Pop in / pop out
+- [x] R2. Pop in / pop out (src/windows.js): 50 slots loop wait > in > hold > out. Spots picked from the segmentation map, weighted face 45 / hands and bare arms 35 / torso and sleeves 20 (torso popups smaller). Mouse fallback until the model loads. Springs and the face/hand tracker removed. 60fps in testing.
 - [ ] R3. Render modes
 - [ ] R5. Audio to popups

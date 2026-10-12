@@ -4,8 +4,8 @@
 //   0 background · 1 hair · 2 body skin (hands, arms, neck)
 //   3 face skin · 4 clothes · 5 other (glasses, hats...)
 // From that we keep one small "label map" per frame, which everything
-// else reads: the popups pick where to open from it (stage 2) and cut the
-// camera out with it (stage 3).
+// else reads: the popups pick where to open from it, and (stage 3) cut
+// the camera out with it.
 //
 // The map is downsized to MAP_W wide (keeping the camera's shape), which
 // is plenty for picking spots and making masks, and cheap to read.
@@ -24,6 +24,7 @@ export function createSegmenter() {
     map: null, // Uint8Array of labels, w x h, in CAMERA space (not mirrored)
     w: 0,
     h: 0,
+    version: 0, // goes up every time the map changes
   };
 
   async function init() {
@@ -68,6 +69,7 @@ export function createSegmenter() {
         const row = Math.floor((y * sh) / h) * sw;
         for (let x = 0; x < w; x++) state.map[y * w + x] = src[row + Math.floor((x * sw) / w)];
       }
+      state.version++;
       mask.close(); // free the GPU/wasm memory
     });
   }

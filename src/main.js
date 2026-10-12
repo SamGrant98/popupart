@@ -2,7 +2,6 @@ import './style.css'
 import { createAudio } from './audio.js'
 import { createMeter } from './meter.js'
 import { createWindows } from './windows.js'
-import { createTracking } from './tracking.js'
 import { createSegmenter } from './segment.js'
 
 const canvas = document.getElementById('stage');
@@ -23,24 +22,6 @@ window.addEventListener('resize', () => { resize(); windows.build(canvas.width, 
 const audio = createAudio();
 const meter = createMeter(audio);
 
-// --- Windows ---
-const windows = createWindows();
-windows.build(canvas.width, canvas.height);
-
-// --- Tracking ---
-// Windows crowd around your face and hands. Until the models have loaded,
-// or when no face is in view, they follow the mouse instead.
-const tracking = createTracking();
-let showTracking = false; // T toggles crosshairs + status
-addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 't' && !e.repeat) showTracking = !showTracking;
-});
-
-// The mouse fallback eases after the pointer so fast flicks look smooth.
-const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
-const focus = { ...pointer };
-addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
-
 // --- Segmentation ---
 // Labels every camera pixel (face, hands, hair, clothes, background).
 // S shows it tinted over the screen.
@@ -49,6 +30,15 @@ let showSegment = false;
 addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 's' && !e.repeat) showSegment = !showSegment;
 });
+
+// --- Popups ---
+// Open and close over wherever you are, picked from the segmentation.
+// Until it has loaded (or when nobody is in view) they crowd the mouse.
+const windows = createWindows(segmenter);
+windows.build(canvas.width, canvas.height);
+
+const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
+addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
 
 // --- Desktop ---
 // The background is the made-up OS desktop: ink with the madebysam dot
@@ -124,8 +114,6 @@ function getCoverRect() {
 
 let last = performance.now();
 
-const start = performance.now();
-
 function render(now) {
   // Seconds since the last frame (capped, so a background tab doesn't
   // make everything jump when you come back).
@@ -143,16 +131,11 @@ function render(now) {
 
   segmenter.update(video, now);
 
-  // Windows: ease the focus towards the pointer, spring the windows
-  // towards the focus, then draw them as portals onto the camera.
-  focus.x += (pointer.x - focus.x) * (1 - Math.exp(-dt / 0.08));
-  focus.y += (pointer.y - focus.y) * (1 - Math.exp(-dt / 0.08));
+  // Popups: open/close over you, each a window onto the camera.
   const cam = { video, rect, width: canvas.width };
-  tracking.update(cam, Math.min(canvas.width, canvas.height), now, dt);
-  windows.update(dt, tracking.anchors(focus), (now - start) / 1000);
+  windows.update(dt, cam, pointer);
   windows.draw(ctx, cam);
   if (showSegment) segmenter.drawDebug(ctx, cam);
-  if (showTracking) tracking.drawDebug(ctx);
 
 
   // Ask the browser to call render again before the next screen refresh.
@@ -163,6 +146,5 @@ function render(now) {
 // before starting the loop.
 startCamera().then(() => {
   requestAnimationFrame(render);
-  tracking.init(); // loads in the background; the mouse works meanwhile
-  segmenter.init();
+  segmenter.init(); // loads in the background; the mouse works meanwhile
 });
