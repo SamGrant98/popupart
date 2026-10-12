@@ -1,7 +1,8 @@
 // The windows: little retro-OS popups, each a portal onto the camera.
 //
 // Each window:
-//   - has a home spot near the focus point (an offset, so they crowd
+//   - belongs to a group: your face (most windows) or one of your hands
+//   - has a home spot near its group's anchor (an offset, so they crowd
 //     around you instead of stacking on one point)
 //   - is pulled to that spot by a spring, so it glides, overshoots a
 //     little and settles, instead of snapping
@@ -60,6 +61,8 @@ export function createWindows() {
         phase: rand() * Math.PI * 2,
         speed: 0.3 + rand() * 0.5,
         name: `cam_${String(i + 1).padStart(2, '0')}.exe`,
+        // 0 = face, 1 = first hand, 2 = second hand (about 60 / 20 / 20)
+        group: (() => { const r = rand(); return r < 0.6 ? 0 : r < 0.8 ? 1 : 2; })(),
         // about 1 in 6 windows get a category colour title bar
         bar: rand() < 0.17 ? CATEGORY[Math.floor(rand() * 4)] : ORANGE,
       };
@@ -67,16 +70,23 @@ export function createWindows() {
   }
 
   // Move every window one step towards its spot.
-  // focus: { x, y } in screen pixels; t: seconds since start.
-  function update(dt, focus, t) {
+  // anchors: { face: {x, y, scale}, hands: [{x, y, scale}, ...] } in screen
+  // pixels (see tracking.js); t: seconds since start.
+  function update(dt, anchors, t) {
     const { stiffness: k, damping: c, spread } = windowSettings;
     for (const win of list) {
-      // Where this window wants to be: the focus point, plus its offset,
+      // Hand windows go to their hand if it's visible, otherwise they
+      // join the face. Hand clusters are tighter than the face's.
+      const hand = win.group > 0 ? anchors.hands[win.group - 1] : null;
+      const a = hand ?? anchors.face;
+      const s = (hand ? 0.45 : 1) * a.scale * spread;
+
+      // Where this window wants to be: its anchor, plus its offset,
       // plus a slow wobble. Positions are window centres.
       const wobX = Math.sin(t * win.speed + win.phase) * 12;
       const wobY = Math.cos(t * win.speed * 0.8 + win.phase) * 9;
-      const tx = focus.x + win.ox * spread + wobX;
-      const ty = focus.y + win.oy * spread + wobY;
+      const tx = a.x + win.ox * s + wobX;
+      const ty = a.y + win.oy * s + wobY;
 
       // Spring: accelerate towards the target, slowed by friction.
       // (Semi-implicit Euler: update velocity, then position. Stable

@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# MediaPipe engine, copied from node_modules on npm install
+public/mediapipe

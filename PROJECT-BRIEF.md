@@ -25,8 +25,13 @@ Lab project for madebysam.dev (category: Play). Vite, vanilla JS, canvas 2D. Ins
 5. **Controls.** Presets, panel, keyboard; performer mode.
 6. **Into the lab.** madebysam lab shell, project page, screenshot.
 
+## Setup notes
+- `npm install` also copies the MediaPipe engine into `public/mediapipe/` (postinstall, gitignored).
+- Model files go in `public/models/` (committed): `blaze_face_short_range.tflite`, `hand_landmarker.task`.
+
 ## Status
 - [x] Mirrored, cover-fitted camera feed
 - [x] 1. Audio + meter (src/audio.js, src/meter.js). Tested with generated tracks in test-audio/: 120bpm simple 43/42 kicks; 128bpm club mix (held sub bass, snare, room noise, kickless breakdown) median gap 0.468s, no double triggers.
 - [x] 2. Windows (src/windows.js): 18 retro-OS frames as camera portals, spring physics, crowd around the mouse for now. 60fps in testing.
-- [ ] 3. Tracking (MediaPipe face + hands as targets)
+- [~] 3. Tracking (src/tracking.js): MediaPipe face detector + hand landmarker, ~60% windows on the face, ~20% per hand, hands fall back to the face, mouse fallback. Logic tested with simulated detections; needs a real-camera test once the model files are in public/models/.
+- [ ] 4. Audio to windows

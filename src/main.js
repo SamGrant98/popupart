@@ -2,6 +2,7 @@ import './style.css'
 import { createAudio } from './audio.js'
 import { createMeter } from './meter.js'
 import { createWindows } from './windows.js'
+import { createTracking } from './tracking.js'
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -25,8 +26,16 @@ const meter = createMeter(audio);
 const windows = createWindows();
 windows.build(canvas.width, canvas.height);
 
-// Until face tracking (step 3), the windows crowd around the mouse.
-// The focus eases after the pointer so even fast flicks look smooth.
+// --- Tracking ---
+// Windows crowd around your face and hands. Until the models have loaded,
+// or when no face is in view, they follow the mouse instead.
+const tracking = createTracking();
+let showTracking = false; // T toggles crosshairs + status
+addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 't' && !e.repeat) showTracking = !showTracking;
+});
+
+// The mouse fallback eases after the pointer so fast flicks look smooth.
 const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
 const focus = { ...pointer };
 addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });
@@ -119,8 +128,11 @@ function render(now) {
   // towards the focus, then draw them as portals onto the camera.
   focus.x += (pointer.x - focus.x) * (1 - Math.exp(-dt / 0.08));
   focus.y += (pointer.y - focus.y) * (1 - Math.exp(-dt / 0.08));
-  windows.update(dt, focus, (now - start) / 1000);
-  windows.draw(ctx, { video, rect, width: canvas.width });
+  const cam = { video, rect, width: canvas.width };
+  tracking.update(cam, Math.min(canvas.width, canvas.height), now, dt);
+  windows.update(dt, tracking.anchors(focus), (now - start) / 1000);
+  windows.draw(ctx, cam);
+  if (showTracking) tracking.drawDebug(ctx);
 
 
   // Ask the browser to call render again before the next screen refresh.
@@ -129,4 +141,7 @@ function render(now) {
 
 // startCamera() returns a Promise, so .then() waits for it to finish
 // before starting the loop.
-startCamera().then(() => requestAnimationFrame(render));
+startCamera().then(() => {
+  requestAnimationFrame(render);
+  tracking.init(); // loads in the background; the mouse works meanwhile
+});
