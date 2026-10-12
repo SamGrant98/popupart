@@ -1,4 +1,6 @@
 import './style.css'
+import { createAudio } from './audio.js'
+import { createMeter } from './meter.js'
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -12,6 +14,12 @@ function resize() {
 
 resize();
 window.addEventListener('resize', resize);
+
+// --- Audio ---
+// Nothing reacts to it yet (step 1): the meter just shows what it hears.
+const audio = createAudio();
+const meter = createMeter(audio);
+
 // --- Camera ---
 
 // A video element that lives only in JS. We never add it to the page;
@@ -63,7 +71,17 @@ function getCoverRect() {
 
 // --- Render loop ---
 
-function render() {
+let last = performance.now();
+
+function render(now) {
+  // Seconds since the last frame (capped, so a background tab doesn't
+  // make everything jump when you come back).
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+
+  audio.update(dt);
+  meter.draw(dt);
+
   const rect = getCoverRect();
 
   // Mirror the video feed
@@ -84,4 +102,4 @@ function render() {
 
 // startCamera() returns a Promise, so .then() waits for it to finish
 // before starting the loop.
-startCamera().then(render);
+startCamera().then(() => requestAnimationFrame(render));

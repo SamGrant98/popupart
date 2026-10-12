@@ -11,3 +11,54 @@ body {
   width: 100vw;
   height: 100vh;
 }
+
+/* ---------------------------------------------------------------
+   Made-up retro OS (first draft; the camera windows will share it).
+   Orange title bar, Martian Mono names, chunky pixel-sharp ink frame.
+   --------------------------------------------------------------- */
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('https://madebysam.dev/fonts/martian-mono/martian-mono-latin-400-normal.woff2') format('woff2');
+  font-display: swap;
+}
+
+.win {
+  position: fixed;
+  border: 3px solid #0d0d0f;
+  box-shadow: 6px 6px 0 #0d0d0f; /* hard drop shadow, no blur: pixel-era */
+  background: #141417;
+  color: #f3f2ee;
+  font: 11px/1.4 'Martian Mono', ui-monospace, monospace;
+  image-rendering: pixelated;
+}
+.win[hidden] { display: none; }
+.win__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 4px 3px 8px;
+  background: #ff6601;
+  color: #0d0d0f;
+  border-bottom: 3px solid #0d0d0f;
+}
+.win__title { font-weight: 400; letter-spacing: 0.02em; }
+.win__close,
+.win__btn {
+  font: inherit;
+  color: #0d0d0f;
+  background: #f3f2ee;
+  border: 2px solid #0d0d0f;
+  box-shadow: inset -2px -2px 0 #9c9b97; /* chunky bevel */
+  cursor: pointer;
+}
+.win__close { width: 20px; height: 20px; padding: 0; line-height: 1; }
+.win__btn { padding: 2px 10px; }
+.win__btn:active, .win__close:active { box-shadow: inset 2px 2px 0 #9c9b97; }
+
+.meter { left: 24px; bottom: 24px; z-index: 10; }
+.meter__body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.meter__row { display: flex; align-items: center; gap: 10px; }
+.meter__hint { color: #9c9b97; }
+.meter__status { margin: 0; color: #9c9b97; }
+kbd { font: inherit; border: 1px solid #3a3a40; padding: 0 3px; }
