@@ -1,19 +1,26 @@
-// The popups: little retro-OS windows that open and close over wherever
-// you are. Nothing travels. Each popup is born on a spot that belongs to
-// you (picked from the segmentation map), pops in, stays a moment, pops
-// out, and a new one opens somewhere else.
+// The popups: little retro-OS windows that outline you. Nothing travels.
 //
-// Where they open is weighted by body part:
+// The rule is coverage, not timers:
+//   - a popup stays open as long as some of you shows through it
+//   - when you move out from under it, it pops out
+//   - any bit of you that isn't covered (by two popups, by default, so
+//     they crowd and overlap) gets a new popup
+// So if you stand still the outline settles and holds; move an arm and
+// only the popups along the old position close, while new ones open
+// along the new one.
+//
+// Where new popups open is weighted by body part:
 //   face  (face skin, hair, glasses)  most popups
 //   body  (bare skin: hands, arms)    a good share
 //   torso (clothes: torso, sleeves)   a few, and smaller
 //
-// There is a fixed number of "slots". Each slot loops forever:
-//   wait (a short random gap) -> in -> hold -> out -> wait -> ...
-// so the number on screen stays steady, and later the audio can cut the
-// waits short to make a burst.
+// Each popup shows you one of three ways (see looks.js): the camera cut
+// out with the mask, halftone dots, or ASCII. Its title says which.
 //
-// Everything is drawn on the canvas (not HTML), so 50+ windows stay smooth.
+// Before the segmentation model has loaded there is no body to outline,
+// so popups just come and go on timers around the mouse.
+//
+// Everything is drawn on the canvas (not HTML), so 80+ windows stay smooth.
 
 import { CLASS } from './segment.js';
 
@@ -28,24 +35,35 @@ const CATEGORY = ['#a274ff', '#00a456', '#3cc8ff', '#ffd619']; // sound, movemen
 
 const IN_TIME = 0.1; // seconds to pop in
 const OUT_TIME = 0.06; // seconds to pop out (closing is snappier than opening)
-const LEAVE_GRACE = 0.08; // seconds off you before a popup closes early
 
 // Tunable by the controls later.
 export const popupSettings = {
-  count: 70, // popups on screen (roughly)
-  life: [0.5, 1.4], // how long each one stays open, min..max seconds
-  gap: [0, 0.08], // pause before a slot opens its next popup
-  leave: true, // close early when you move out from under it
+  max: 90, // most popups open at once
+  cover: 0.9, // stop opening new popups once this much of you is covered...
+  layers: 2, // ...by at least this many popups (2 = a crowded, overlapping look)
+  closeBelow: 0.12, // close when less than this much of a popup is you...
+  grace: 0.1, // ...for this many seconds (so a flicker in the mask doesn't)
+  openAbove: 0.25, // a new popup must be at least this much you
+  perFrame: 3, // most new popups per frame: fast, but not all at once
+  shuffle: 0, // popups per second swapped out at random, even when still (off)
   size: 1, // overall size multiplier
   // Where popups open. Don't need to add up to 1; they're relative.
   weights: { face: 0.45, body: 0.35, torso: 0.2 },
+  // How popups show you. Relative, like the weights.
+  modes: { cam: 0.5, dots: 0.3, ascii: 0.2 },
+  // Mouse fallback (no body yet): this many popups, each open this long.
+  fallbackCount: 30,
+  fallbackLife: [0.5, 1.4],
 };
 
-// Per body part: width range (px at an 800px-tall screen) and title prefix.
+// Title for each mode: cam_07.exe, dots_12.exe, ascii_03.txt
+const TITLE = { cam: ['cam', 'exe'], dots: ['dots', 'exe'], ascii: ['ascii', 'txt'] };
+
+// Per body part: width range (px at an 800px-tall screen).
 const PARTS = {
-  face: { w: [110, 220], name: 'cam' },
-  body: { w: [80, 170], name: 'cam' },
-  torso: { w: [64, 130], name: 'cam' },
+  face: { w: [110, 220] },
+  body: { w: [80, 170] },
+  torso: { w: [64, 130] },
 };
 // Which segmentation labels count as which part.
 const PART_OF = {
@@ -56,6 +74,15 @@ const PART_OF = {
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
+// Pick a key from { key: weight, ... } at random, by weight.
+function pickWeighted(weights, keys = Object.keys(weights)) {
+  let total = 0;
+  for (const k of keys) total += weights[k];
+  let r = Math.random() * total;
+  for (const k of keys) if ((r -= weights[k]) <= 0) return k;
+  return keys[keys.length - 1];
+}
+
 // Overshoot ease: grows a touch past full size, then settles. Gives the
 // "pop" without a bouncy spring.
 function easeOutBack(t) {
@@ -63,71 +90,68 @@ function easeOutBack(t) {
   return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2;
 }
 
-export function createWindows(segmenter) {
-  let slots = [];
+export function createWindows(segmenter, looks) {
+  let list = []; // open popups (including ones popping in or out)
   let screen = { w: 1, h: 1 };
   let order = 0; // increases with every popup, so newer ones draw on top
 
-  // Lists of map cells for each body part, rebuilt when the map changes.
-  const pools = { face: [], body: [], torso: [] };
-  let poolVersion = -1;
+  // How many popups cover each map cell. Same grid as the segmentation
+  // map (camera space), rebuilt every frame.
+  let cover = new Uint16Array(0);
+
+  // Uncovered cells of you, per body part (filled each frame).
+  const gaps = { face: [], body: [], torso: [] };
 
   function build(w, h) {
     screen = { w, h };
-    // Fresh slots, all waiting a random bit so they don't all open at once.
-    slots = Array.from({ length: popupSettings.count }, () => ({
-      phase: 'wait', t: 0, wait: rand(0, 1.5), popup: null,
-    }));
+    list = [];
   }
 
-  function refreshPools() {
-    const s = segmenter.state;
-    if (!s.map || s.version === poolVersion) return;
-    poolVersion = s.version;
-    pools.face.length = pools.body.length = pools.torso.length = 0;
-    for (let i = 0; i < s.map.length; i++) {
-      const part = PART_OF[s.map[i]];
-      if (part) pools[part].push(i);
-    }
+  // --- Screen <-> map ---
+  // The map is in camera space; the screen shows the camera mirrored and
+  // cover-fitted (cam.rect). These turn a screen rectangle into the range
+  // of map cells under it, and a map cell into a screen point.
+
+  function cellsUnder(p, cam) {
+    const s = segmenter.state, { rect, width } = cam;
+    const x = p.x - p.w / 2, y = p.y - p.h / 2;
+    // Mirrored: the screen's right edge is the camera's left.
+    const i0 = Math.max(0, Math.floor(((width - x - p.w - rect.x) / rect.w) * s.w));
+    const i1 = Math.min(s.w - 1, Math.floor(((width - x - rect.x) / rect.w) * s.w));
+    const j0 = Math.max(0, Math.floor(((y - rect.y) / rect.h) * s.h));
+    const j1 = Math.min(s.h - 1, Math.floor(((y + p.h - rect.y) / rect.h) * s.h));
+    return { i0, i1, j0, j1 };
   }
 
-  // Pick a body part by weight, skipping any that aren't in view.
-  function pickPart() {
-    const { weights } = popupSettings;
-    const live = Object.keys(pools).filter((p) => pools[p].length > 0);
-    if (!live.length) return null;
-    let total = 0;
-    for (const p of live) total += weights[p];
-    let r = Math.random() * total;
-    for (const p of live) if ((r -= weights[p]) <= 0) return p;
-    return live[live.length - 1];
-  }
-
-  // Where to open the next popup, in screen pixels, and which part it's on.
-  // cam: { rect, width } (the camera's cover-fitted, mirrored placement).
-  // fallback: a screen point to crowd around when nobody is in view
-  // (the mouse), so the page is never empty while the model loads.
-  function pickSpot(cam, fallback) {
-    const part = pickPart();
-    if (!part) {
-      const unit = Math.min(screen.w, screen.h);
-      const a = Math.random() * Math.PI * 2;
-      const d = Math.pow(Math.random(), 1.5) * unit * 0.3;
-      return { x: fallback.x + Math.cos(a) * d, y: fallback.y + Math.sin(a) * d * 0.8, part: 'face', free: true };
-    }
-    const s = segmenter.state;
-    const pool = pools[part];
-    const cell = pool[Math.floor(Math.random() * pool.length)];
-    // Somewhere inside that cell, as a 0..1 fraction of the camera image...
+  function cellToScreen(cell, cam) {
+    const s = segmenter.state, { rect, width } = cam;
     const u = ((cell % s.w) + Math.random()) / s.w;
     const v = (Math.floor(cell / s.w) + Math.random()) / s.h;
-    // ...then onto the screen. The camera is mirrored, hence width - x.
-    const { rect, width } = cam;
-    return { x: width - (rect.x + u * rect.w), y: rect.y + v * rect.h, part };
+    return { x: width - (rect.x + u * rect.w), y: rect.y + v * rect.h };
   }
 
-  function spawn(cam, fallback) {
-    const { x, y, part, free } = pickSpot(cam, fallback);
+  // How much of a popup's area is you (0..1). With mark, also counts it
+  // into the coverage grid.
+  function measure(p, cam, mark) {
+    const s = segmenter.state;
+    const { i0, i1, j0, j1 } = cellsUnder(p, cam);
+    let you = 0, all = 0;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const k = j * s.w + i;
+        all++;
+        if (s.map[k] !== CLASS.background) you++;
+        if (mark) cover[k]++;
+      }
+    }
+    // Any part hanging off the edge of the camera counts as not you.
+    const full = (p.w / cam.rect.w) * s.w * (p.h / cam.rect.h) * s.h;
+    return you / Math.max(1, all, full);
+  }
+
+  // --- Making a popup ---
+
+  function makePopup(x, y, part, free) {
     const spec = PARTS[part];
     const unit = Math.min(screen.w, screen.h) / 800;
     const big = Math.random() < 0.1; // the odd big one
@@ -135,83 +159,134 @@ export function createWindows(segmenter) {
     // Snapped to 8px so edges stay crisp.
     const w = Math.max(56, Math.round(base / 8) * 8);
     const h = Math.max(40, Math.round((w * rand(0.55, 1)) / 8) * 8) + BAR;
+    const mode = pickWeighted(popupSettings.modes);
+    const [stem, ext] = TITLE[mode];
     return {
-      x, y, w, h, part,
-      free: !!free, // mouse popups don't check whether you're under them
-      away: 0, // how long you've been gone from under it
-      life: rand(popupSettings.life[0], popupSettings.life[1]),
+      x, y, w, h, part, mode,
+      phase: 'in', t: 0,
+      free, // mouse popups: on a timer, not tied to you
+      life: free ? rand(...popupSettings.fallbackLife) : Infinity,
+      away: 0, // how long it's been (nearly) empty of you
       order: order++,
-      name: `${spec.name}_${String(Math.floor(rand(1, 100))).padStart(2, '0')}.exe`,
+      name: `${stem}_${String(Math.floor(rand(1, 100))).padStart(2, '0')}.${ext}`,
       // about 1 in 6 get a category colour title bar
       bar: Math.random() < 0.17 ? CATEGORY[Math.floor(Math.random() * 4)] : ORANGE,
     };
   }
 
-  // Is the screen point x, y still on you? (Background = no.)
-  function onYou(x, y, cam) {
-    const { rect, width } = cam;
-    const u = (width - x - rect.x) / rect.w; // undo the mirror
-    const v = (y - rect.y) / rect.h;
-    if (u < 0 || u > 1 || v < 0 || v > 1) return false;
-    return segmenter.labelAt(u, v) !== CLASS.background;
+  function close(p) {
+    if (p.phase === 'out') return;
+    p.phase = 'out';
+    p.t = 0;
   }
 
-  // Step every slot through its loop. cam as in pickSpot.
+  // --- Each frame ---
+
+  // cam: { rect, width } (the camera's cover-fitted, mirrored placement).
+  // fallback: a screen point (the mouse) for when there's no body yet.
   function update(dt, cam, fallback) {
-    refreshPools();
-    for (const slot of slots) {
-      slot.t += dt;
-      // You moved away from under this popup: close it early, so the slot
-      // is free to open again where you are now.
-      const p = slot.popup;
-      if (popupSettings.leave && p && !p.free && (slot.phase === 'in' || slot.phase === 'hold')) {
-        p.away = onYou(p.x, p.y, cam) ? 0 : p.away + dt;
-        if (p.away > LEAVE_GRACE) {
-          slot.phase = 'out';
-          slot.t = 0;
-          continue;
+    const S = popupSettings;
+    const s = segmenter.state;
+
+    // Animate, and drop popups that have finished closing.
+    for (const p of list) {
+      p.t += dt;
+      if (p.phase === 'in' && p.t >= IN_TIME) { p.phase = 'hold'; p.t = 0; }
+      if (p.phase === 'hold' && p.t >= p.life) close(p);
+    }
+    list = list.filter((p) => !(p.phase === 'out' && p.t >= OUT_TIME));
+
+    if (!s.map) return fallbackUpdate(fallback);
+
+    // 1. Close popups you've left, and count what the rest cover.
+    if (cover.length !== s.map.length) cover = new Uint16Array(s.map.length);
+    cover.fill(0);
+    for (const p of list) {
+      if (p.phase === 'out' || p.free) continue;
+      const frac = measure(p, cam, true);
+      p.away = frac < S.closeBelow ? p.away + dt : 0;
+      if (p.away > S.grace) close(p);
+    }
+
+    // Optional shuffle: swap out the odd still popup, so a still pose
+    // keeps a little life. (The gap it leaves gets refilled below.)
+    if (S.shuffle > 0 && Math.random() < S.shuffle * dt) {
+      const held = list.filter((p) => p.phase === 'hold' && !p.free);
+      if (held.length) close(held[Math.floor(Math.random() * held.length)]);
+    }
+
+    // 2. Find the bits of you that aren't covered enough.
+    gaps.face.length = gaps.body.length = gaps.torso.length = 0;
+    let youCells = 0, covered = 0;
+    for (let k = 0; k < s.map.length; k++) {
+      const part = PART_OF[s.map[k]];
+      if (!part) continue;
+      youCells++;
+      if (cover[k] >= S.layers) covered++;
+      else gaps[part].push(k);
+    }
+    if (!youCells) return; // nobody in view: the outline just empties out
+
+    // 3. Open popups on the gaps until you're covered enough.
+    let live = list.filter((p) => p.phase !== 'out').length;
+    let made = 0, tries = 0;
+    while (made < S.perFrame && tries < S.perFrame * 4 && covered / youCells < S.cover && live < S.max) {
+      tries++;
+      const parts = Object.keys(gaps).filter((g) => gaps[g].length > 0);
+      if (!parts.length) break;
+      const part = pickWeighted(S.weights, parts);
+      const pool = gaps[part];
+      const { x, y } = cellToScreen(pool[Math.floor(Math.random() * pool.length)], cam);
+      const p = makePopup(x, y, part, false);
+      // Hardly any of you in it (a stray edge pixel): try somewhere else.
+      if (measure(p, cam, false) < S.openAbove) continue;
+      // Mark what it covers, so the next one goes somewhere new.
+      const { i0, i1, j0, j1 } = cellsUnder(p, cam);
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const k = j * s.w + i;
+          cover[k]++;
+          if (cover[k] === S.layers && PART_OF[s.map[k]]) covered++;
         }
       }
-      if (slot.phase === 'wait' && slot.t >= slot.wait) {
-        slot.popup = spawn(cam, fallback);
-        slot.phase = 'in';
-        slot.t = 0;
-      } else if (slot.phase === 'in' && slot.t >= IN_TIME) {
-        slot.phase = 'hold';
-        slot.t = 0;
-      } else if (slot.phase === 'hold' && slot.t >= slot.popup.life) {
-        slot.phase = 'out';
-        slot.t = 0;
-      } else if (slot.phase === 'out' && slot.t >= OUT_TIME) {
-        slot.phase = 'wait';
-        slot.t = 0;
-        slot.popup = null;
-        slot.wait = rand(popupSettings.gap[0], popupSettings.gap[1]);
-      }
+      for (const g of parts) gaps[g] = gaps[g].filter((k) => cover[k] < S.layers);
+      list.push(p);
+      live++;
+      made++;
     }
   }
 
-  // How open a slot's popup is: 0 (closed) to 1 (open), a bit over 1
-  // while it pops.
-  function openness(slot) {
-    if (slot.phase === 'in') return easeOutBack(Math.min(1, slot.t / IN_TIME));
-    if (slot.phase === 'out') return 1 - Math.min(1, slot.t / OUT_TIME);
-    return slot.phase === 'hold' ? 1 : 0;
+  // No body yet: popups come and go on timers around the mouse.
+  function fallbackUpdate(fallback) {
+    const S = popupSettings;
+    let live = list.filter((p) => p.phase !== 'out').length;
+    for (let made = 0; live < S.fallbackCount && made < S.perFrame; made++, live++) {
+      const unit = Math.min(screen.w, screen.h);
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.pow(Math.random(), 1.5) * unit * 0.3;
+      list.push(makePopup(fallback.x + Math.cos(a) * d, fallback.y + Math.sin(a) * d * 0.8, 'face', true));
+    }
+  }
+
+  // How open a popup is: 0 (closed) to 1 (open), a bit over 1 while it pops.
+  function openness(p) {
+    if (p.phase === 'in') return easeOutBack(Math.min(1, p.t / IN_TIME));
+    if (p.phase === 'out') return 1 - Math.min(1, p.t / OUT_TIME);
+    return 1;
   }
 
   // Draw all open popups, oldest first so new ones land on top.
-  // cam: { video, rect, width } for the camera crop inside each one.
-  function draw(ctx, cam) {
-    const open = slots.filter((s) => s.popup).sort((a, b) => a.popup.order - b.popup.order);
+  // desktop: the desktop fill, shown behind you in cam popups.
+  function draw(ctx, desktop) {
+    const open = [...list].sort((a, b) => a.order - b.order);
     ctx.font = '10px "Martian Mono", ui-monospace, monospace';
     ctx.textBaseline = 'middle';
 
-    for (const slot of open) {
-      const k = openness(slot);
+    for (const p of open) {
+      const k = openness(p);
       if (k < 0.05) continue;
-      const p = slot.popup;
       // Scale around the popup's centre. The frame is what grows; the
-      // camera inside always shows exactly what's behind it, so you stay
+      // picture inside always shows exactly what's behind it, so you stay
       // lined up even mid-pop.
       const w = Math.round(p.w * k);
       const h = Math.round(p.h * k);
@@ -238,27 +313,15 @@ export function createWindows(segmenter) {
       ctx.fillStyle = PAPER;
       ctx.fillRect(x + w - BORDER - cb - 3, y + BORDER + 3, cb, cb);
 
-      // Content: the camera pixels behind this popup.
-      drawCameraCrop(ctx, cam, x + BORDER, y + BAR + 1, w - BORDER * 2, h - BAR - 1 - BORDER);
+      // Content: you, in this popup's mode. Dots take the title bar's
+      // colour, so the odd category popup has category dots.
+      const cx = x + BORDER, cy = y + BAR + 1;
+      const cw = w - BORDER * 2, ch = h - BAR - 1 - BORDER;
+      if (p.mode === 'cam') looks.drawCam(ctx, cx, cy, cw, ch, desktop);
+      else if (p.mode === 'dots') looks.drawDots(ctx, cx, cy, cw, ch, p.bar);
+      else looks.drawAscii(ctx, cx, cy, cw, ch);
     }
   }
 
-  return { build, update, draw, get slots() { return slots; } };
-}
-
-// Draw the part of the (mirrored, cover-fitted) camera that sits under the
-// screen rectangle cx,cy,cw,ch, into that same rectangle.
-function drawCameraCrop(ctx, { video, rect, width }, cx, cy, cw, ch) {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || cw <= 0 || ch <= 0) return;
-  // The camera is mirrored, so screen x maps to (width - x) before the flip.
-  const sx = ((width - cx - cw - rect.x) / rect.w) * vw;
-  const sy = ((cy - rect.y) / rect.h) * vh;
-  const sw = (cw / rect.w) * vw;
-  const sh = (ch / rect.h) * vh;
-  ctx.save();
-  ctx.translate(cx + cw, cy);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
-  ctx.restore();
+  return { build, update, draw, get list() { return list; } };
 }

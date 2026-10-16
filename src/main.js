@@ -3,6 +3,7 @@ import { createAudio } from './audio.js'
 import { createMeter } from './meter.js'
 import { createWindows } from './windows.js'
 import { createSegmenter } from './segment.js'
+import { createLooks } from './looks.js'
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -34,7 +35,9 @@ addEventListener('keydown', (e) => {
 // --- Popups ---
 // Open and close over wherever you are, picked from the segmentation.
 // Until it has loaded (or when nobody is in view) they crowd the mouse.
-const windows = createWindows(segmenter);
+// looks: the cam / dots / ASCII layers the popups show.
+const looks = createLooks(segmenter);
+const windows = createWindows(segmenter, looks);
 windows.build(canvas.width, canvas.height);
 
 const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
@@ -133,8 +136,9 @@ function render(now) {
 
   // Popups: open/close over you, each a window onto the camera.
   const cam = { video, rect, width: canvas.width };
+  looks.update(cam, canvas.width, canvas.height);
   windows.update(dt, cam, pointer);
-  windows.draw(ctx, cam);
+  windows.draw(ctx, desktop);
   if (showSegment) segmenter.drawDebug(ctx, cam);
 
 
